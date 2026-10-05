@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>James AI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">J</div>
+        <div>
+          <h1>James AI</h1>
+          <p><span class="online-dot"></span> AI Assistant</p>
+        </div>
+      </div>
+      <button id="newChatBtn" class="new-chat">＋ New chat</button>
+    </header>
+
+    <main class="main">
+      <aside class="sidebar">
+        <button class="category active" data-prompt="Help me with a general question.">
+          💬 <span>အထွေထွေမေးခွန်း</span>
+        </button>
+        <button class="category" data-prompt="Help me with programming or code.">
+          💻 <span>Programming / Code</span>
+        </button>
+        <button class="category" data-prompt="Help me with my school subject or homework.">
+          📚 <span>စာသင်ခန်းဆိုင်ရာ</span>
+        </button>
+        <button class="category" data-prompt="Translate this for me.">
+          🌐 <span>ဘာသာပြန်</span>
+        </button>
+        <button class="category" data-prompt="Help me write or rewrite this.">
+          ✍️ <span>စာရေး / ပြင်ဆင်</span>
+        </button>
+        <button class="category" data-prompt="Help me solve this math problem step by step.">
+          🧮 <span>သင်္ချာ</span>
+        </button>
+        <button class="category" data-prompt="Explain this topic simply and clearly.">
+          🧠 <span>အကြောင်းအရာရှင်းပြ</span>
+        </button>
+        <button class="category" data-prompt="Please answer me in Burmese.">
+          🇲🇲 <span>မြန်မာလို မေး / ဖြေ</span>
+        </button>
+        <button class="category" data-prompt="Please answer me in English.">
+          🇬🇧 <span>English မေး / ဖြေ</span>
+        </button>
+
+        <div class="side-note">
+          <strong>James AI</strong>
+          <p>မေးချင်တာကို ရိုက်ပြီး Send နှိပ်ပါ။</p>
+        </div>
+      </aside>
+
+      <section class="chat">
+        <div id="messages" class="messages">
+          <div class="welcome">
+            <div class="welcome-logo">J</div>
+            <h2>James AI</h2>
+            <p>ဘာကူညီပေးရမလဲ?</p>
+
+            <div class="quick-grid">
+              <button class="quick" data-prompt="Python ကို beginner အနေနဲ့ ဘယ်လိုစလေ့လာရမလဲ?">💻 Coding</button>
+              <button class="quick" data-prompt="Photosynthesis ကို ရိုးရိုးရှင်းရှင်းရှင်းပြပါ။">📚 Study</button>
+              <button class="quick" data-prompt="2x + 7 = 19 ကို အဆင့်လိုက်ဖြေရှင်းပေးပါ။">🧮 Math</button>
+              <button class="quick" data-prompt="ဒီစာကို English လို ဘာသာပြန်ပေးပါ။">🌐 Translate</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="typing" class="typing hidden">
+          <span></span><span></span><span></span> James AI စဉ်းစားနေသည်...
+        </div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="messageInput" rows="1" placeholder="James AI ကို မေးပါ..." autocomplete="off"></textarea>
+          <button id="sendButton" type="submit" aria-label="Send">➤</button>
+        </form>
+        <p class="disclaimer">James AI can make mistakes. Check important information.</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
