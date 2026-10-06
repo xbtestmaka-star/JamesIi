@@ -7,121 +7,105 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Always load the .env file from this project's root folder.
-const envResult = dotenv.config({
+dotenv.config({
   path: path.join(__dirname, ".env")
 });
 
-if (envResult.error && envResult.error.code !== "ENOENT") {
-  console.warn("Could not load .env:", envResult.error.message);
-}
-
 const app = express();
+
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 
+const apiKey = String(process.env.OPENAI_API_KEY || "")
+  .trim()
+  .replace(/^['"]|['"]$/g, "");
 
-// Allow the frontend to call the API when index.html is opened in Chrome,
-// VS Code Live Server, or directly as a file:// page.
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-  next();
-});
+const model = process.env.OPENAI_MODEL || "gpt-6-luna";
+const imageModel = process.env.OPENAI_IMAGE_MODEL || "gpt-image-2";
+const googleClientId = String(process.env.GOOGLE_CLIENT_ID || "").trim();
 
-app.use(express.json({ limit: "1mb" }));
+const client = apiKey
+  ? new OpenAI({ apiKey })
+  : null;
+
+app.use(express.json({ limit: "30mb" }));
+
 app.use(express.static(path.join(__dirname, "public")));
 
-function normalizeKey(value) {
-  if (typeof value !== "string") return "";
-  return value
-    .replace(/^\uFEFF/, "")
-    .trim()
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
+
+function getBearerToken(req) {
+  const value = String(req.headers.authorization || "");
+  return value.startsWith("Bearer ") ? value.slice(7).trim() : "";
 }
 
-const apiKey = normalizeKey(process.env.OPENAI_API_KEY);
-const model = process.env.OPENAI_MODEL || "gpt-6-luna";
-const client = apiKey ? new OpenAI({ apiKey }) : null;
+async function verifyGoogleCredential(req) {
+  const credential = getBearerToken(req);
+  if (!credential || !googleClientId) return null;
 
-if (!apiKey) {
-  console.warn("WARNING: OPENAI_API_KEY is missing in .env");
+  try {
+    const r = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`
+    );
+    if (!r.ok) return null;
+
+    const data = await r.json();
+
+    // Verify the token is meant for this James AI Google OAuth client.
+    if (String(data.aud || "") !== googleClientId) return null;
+
+    // tokeninfo validates expiry/signature with Google. Keep only the
+    // identity information needed by the app.
+    return {
+      sub: String(data.sub || ""),
+      email: String(data.email || ""),
+      name: String(data.name || ""),
+      picture: String(data.picture || ""),
+      email_verified: String(data.email_verified || "") === "true"
+    };
+  } catch {
+    return null;
+  }
 }
 
-const SYSTEM_INSTRUCTIONS = `
-You are James AI, a helpful general-purpose AI assistant.
-
-Answer naturally and accurately like a modern chat assistant.
-
-You can help with:
-- General questions
-- Programming and coding
-- School and study subjects
-- Translation
-- Writing, rewriting and proofreading
-- Mathematics
-- Explaining difficult topics simply
-- Myanmar/Burmese questions and answers
-- English questions and answers
-
-Language behavior:
-- If the user writes Burmese, answer in natural Burmese.
-- If the user writes English, answer in natural English.
-- If the user asks for translation, translate faithfully.
-- Burmese + English technical terms are fine when useful.
-
-Programming:
-- Give runnable code when requested.
-- Clearly say which file code belongs in.
-- Never claim code was tested unless it was actually tested.
-
-Math:
-- Show important steps and check the calculation.
-
-General:
-- Be friendly, concise, and useful.
-- Do not invent facts.
-`;
-
-function cleanHistory(history) {
-  if (!Array.isArray(history)) return [];
-  return history
-    .filter(m =>
-      m &&
-      (m.role === "user" || m.role === "assistant") &&
-      typeof m.content === "string"
-    )
-    .slice(-24)
-    .map(m => ({
-      role: m.role,
-      content: m.content.slice(0, 12000)
-    }));
+async function requireGoogleLogin(req, res, next) {
+  const user = await verifyGoogleCredential(req);
+  if (!user || !user.email_verified) {
+    return res.status(401).json({
+      ok: false,
+      error: "Google Login လုပ်ပြီးမှ James AI ကို အသုံးပြုနိုင်ပါတယ်။",
+      code: "GOOGLE_LOGIN_REQUIRED"
+    });
+  }
+  req.googleUser = user;
+  next();
 }
 
-function safeErrorMessage(error) {
-  const status = error?.status;
-  const code = error?.code;
-  const message = String(error?.message || "Unknown API error");
 
-  if (status === 401 || code === "invalid_api_key") {
-    return "OpenAI API key မမှန်ပါ။ .env ထဲက OPENAI_API_KEY ကို ပြန်စစ်ပါ။";
-  }
-  if (status === 429) {
-    return "OpenAI API limit / billing ပြဿနာ ဖြစ်နေပါတယ်။ API account ရဲ့ billing/limits ကို စစ်ပါ။";
-  }
-  if (status === 403) {
-    return "ဒီ API key မှာ ဒီ request ကိုလုပ်ခွင့်မရှိပါ။ Project/permissions ကို စစ်ပါ။";
-  }
-  if (status >= 500) {
-    return "OpenAI server ဘက်က ခဏပြဿနာဖြစ်နေပါတယ်။ ခဏနေရင် ထပ်စမ်းပါ။";
+app.get("/api/config", (_req, res) => {
+  res.json({
+    ok: true,
+    googleClientId
+  });
+});
+
+app.post("/api/auth/google", async (req, res) => {
+  const user = await verifyGoogleCredential(req);
+  if (!user || !user.email_verified) {
+    return res.status(401).json({
+      ok: false,
+      error: "Google account verification failed."
+    });
   }
 
-  return message;
-}
+  res.json({
+    ok: true,
+    user: {
+      name: user.name,
+      email: user.email,
+      picture: user.picture
+    }
+  });
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -129,39 +113,50 @@ app.get("/api/health", (_req, res) => {
     name: "James AI",
     apiConfigured: Boolean(client),
     model,
-    keyPrefix: apiKey ? apiKey.slice(0, 7) + "..." : null
+    imageModel
   });
 });
 
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", requireGoogleLogin, async (req, res) => {
   try {
     if (!client) {
       return res.status(500).json({
         ok: false,
-        error: "OPENAI_API_KEY မတွေ့ပါ။ Project folder ထဲက .env ဖိုင်ကို စစ်ပါ။"
+        error: "OPENAI_API_KEY မတွေ့ပါ။ .env ကိုစစ်ပါ။"
       });
     }
 
-    const message = typeof req.body?.message === "string"
-      ? req.body.message.trim()
-      : "";
+    const message =
+      typeof req.body?.message === "string"
+        ? req.body.message.trim()
+        : "";
 
     if (!message) {
       return res.status(400).json({
         ok: false,
-        error: "Message is empty."
+        error: "Message is required."
       });
     }
 
-    const history = cleanHistory(req.body?.history);
-
     const response = await client.responses.create({
       model,
-      instructions: SYSTEM_INSTRUCTIONS,
-      input: [
-        ...history,
-        { role: "user", content: message }
-      ]
+      instructions: `
+You are James AI.
+
+Answer naturally and accurately.
+If the user writes Burmese, answer in natural Burmese.
+If English, answer in English.
+
+Help with:
+- General questions
+- Programming
+- Study
+- Translation
+- Writing
+- Math
+- Explanations
+`,
+      input: message
     });
 
     const reply = String(response.output_text || "").trim();
@@ -169,43 +164,98 @@ app.post("/api/chat", async (req, res) => {
     if (!reply) {
       return res.status(502).json({
         ok: false,
-        error: "AI က အဖြေဗလာ ပြန်လာပါတယ်။ ထပ်စမ်းကြည့်ပါ။"
+        error: "AI က အဖြေမပြန်လာပါ။"
       });
     }
 
-    return res.json({
+    res.json({
       ok: true,
       name: "James AI",
       reply
     });
+
   } catch (error) {
-    console.error("James AI API error:", error);
-    return res.status(Number(error?.status) || 500).json({
+    console.error("CHAT ERROR:", error);
+
+    res.status(Number(error?.status || 500)).json({
       ok: false,
-      error: safeErrorMessage(error)
+      error: String(error?.message || "Server error")
     });
   }
 });
 
-// Keep API errors JSON so the browser never gets an empty/non-JSON response.
-app.use((err, _req, res, _next) => {
-  console.error("Express error:", err);
-  res.status(500).json({
-    ok: false,
-    error: err?.message || "Server error."
-  });
+app.post("/api/images", requireGoogleLogin, async (req, res) => {
+  try {
+    if (!client) {
+      return res.status(500).json({
+        ok: false,
+        error: "OPENAI_API_KEY မတွေ့ပါ။"
+      });
+    }
+
+    const prompt =
+      typeof req.body?.prompt === "string"
+        ? req.body.prompt.trim()
+        : "";
+
+    if (!prompt) {
+      return res.status(400).json({
+        ok: false,
+        error: "Image prompt is empty."
+      });
+    }
+
+    const result = await client.images.generate({
+      model: imageModel,
+      prompt,
+      size: "1024x1024"
+    });
+
+    const image = result?.data?.[0]?.b64_json;
+
+    if (!image) {
+      return res.status(502).json({
+        ok: false,
+        error: "Image data မရပါ။"
+      });
+    }
+
+    res.json({
+      ok: true,
+      image: `data:image/png;base64,${image}`
+    });
+
+  } catch (error) {
+    console.error("IMAGE ERROR:", error);
+
+    res.status(Number(error?.status || 500)).json({
+      ok: false,
+      error: String(error?.message || "Image error")
+    });
+  }
 });
 
-const HOST = process.env.HOST || "0.0.0.0";
-
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log("");
-  console.log("================================");
-  console.log("          James AI Server");
-  console.log("================================");
-  console.log(`http://localhost:${PORT}`);
-  console.log(`Chrome / Live Server API: http://127.0.0.1:${PORT}/api/health`);
+  console.log("=================================");
+  console.log("       JAMES AI SERVER");
+  console.log("=================================");
+  console.log(`URL: http://localhost:${PORT}`);
+  console.log(`OpenAI: ${client ? "configured" : "MISSING"}`);
+  console.log(`Google Login: ${googleClientId ? "configured" : "MISSING GOOGLE_CLIENT_ID"}`);
   console.log(`Model: ${model}`);
-  console.log(`API key: ${apiKey ? "FOUND" : "MISSING"}`);
+  console.log("=================================");
   console.log("");
+});
+
+server.on("error", (error) => {
+  console.error("SERVER ERROR:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("UNCAUGHT EXCEPTION:", error);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("UNHANDLED REJECTION:", error);
 });
